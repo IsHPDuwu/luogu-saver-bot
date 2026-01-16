@@ -168,21 +168,21 @@ declare module 'koishi' {
   }
 }
 
-const { katex } = await import('@mdit/plugin-katex')
-
-// --- Markdown 渲染器初始化 ---
-const md = new MarkdownIt({
-  html: true,
-  breaks: true,
-}).use(katex, {
-  allowFunctionInTextMode: true, // 允许在文本模式下使用函数
-  strict: false, // 禁用严格模式，防止因不标准语法报错
-});
-
 // --- 样式表与模板生成 ---
 
-function generateHtml(title: string, authorInfo: string, markdownContent: string) {
-    const renderedBody = md.render(markdownContent);
+async function generateHtml(title: string, authorInfo: string, markdownContent: string) {
+  const { katex } = await import('@mdit/plugin-katex')
+
+  // --- Markdown 渲染器初始化 ---
+  const md = new MarkdownIt({
+    html: true,
+    breaks: true,
+  }).use(katex, {
+    allowFunctionInTextMode: true, // 允许在文本模式下使用函数
+    strict: false, // 禁用严格模式，防止因不标准语法报错
+  });  
+  
+  const renderedBody = md.render(markdownContent);
     
     // 使用 CDN 引入必要的样式：GitHub Markdown CSS, KaTeX CSS, Highlight.js CSS
     // 同时也包含自定义的美化样式
@@ -388,7 +388,7 @@ export function apply(ctx: Context, config: Config = {}) {
       const title = art.title ?? ''
       const authorInfo = `作者 UID: ${art.authorId}`
 
-      const html = generateHtml(title, authorInfo, rawContent)
+      const html = await generateHtml(title, authorInfo, rawContent)
 
       if (!ctx.puppeteer) return '当前没有可用的 puppeteer 服务。'
 
@@ -466,7 +466,7 @@ export function apply(ctx: Context, config: Config = {}) {
       const title = `剪贴板: ${paste.id}`
       const authorInfo = paste.author ? `创建者: ${paste.author.name} (UID: ${paste.author.id})` : `创建者 UID: ${paste.authorId}`
 
-      const html = generateHtml(title, authorInfo, rawContent)
+      const html = await generateHtml(title, authorInfo, rawContent)
 
       if (!ctx.puppeteer) return '当前没有可用的 puppeteer 服务。'
 
