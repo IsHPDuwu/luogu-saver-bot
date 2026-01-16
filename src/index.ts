@@ -1,5 +1,8 @@
 import { Context, Schema, h } from 'koishi'
 import { TaskStatus, statusToString } from './task'
+import MarkdownIt from 'markdown-it'
+import mk from 'markdown-it-katex'
+import hljs from 'highlight.js'
 
 export const name = 'luogu-saver-bot'
 export const inject = ['puppeteer']
@@ -14,6 +17,7 @@ export const Config: Schema<Config> = Schema.object({
   userAgent: Schema.string().description('自定义 User-Agent').role('input').default('Uptime-Kuma'),
 })
 
+// --- 类型定义保持不变 ---
 export type Article = {
   id: string
   title: string
@@ -68,9 +72,7 @@ export type Paste = {
 }
 
 export type CountResponse = { count: number }
-
 export type TaskQuery = Record<string, any> | null
-
 export type Task = {
   id: string
   info?: string | null
@@ -84,9 +86,9 @@ export type Task = {
 export type TaskCreateBase = { type: string; payload: Record<string, any> }
 export type TaskCreateSave = TaskCreateBase & { type: 'save'; payload: { target: string; targetId: string; metadata?: Record<string, any> } }
 export type TaskCreateAi = TaskCreateBase & { type: 'ai_process'; payload: { target: string; metadata: Record<string, any> } }
-
 export type TaskCreateResponse = { taskId: string }
 
+// --- Client 类保持不变 ---
 class LuoguSaverClient {
   constructor(private ctx: Context, public endpoint: string, public userAgent: string) {
     if (!this.endpoint) this.endpoint = ''
@@ -95,7 +97,6 @@ class LuoguSaverClient {
   private buildUrl(path: string) {
     const base = this.endpoint.replace(/\/$/, '')
     if (!base) return path
-    console.log(`${base}${path}`)
     if (path.startsWith('/')) return `${base}${path}`
     return `${base}/${path}`
   }
@@ -169,12 +170,197 @@ declare module 'koishi' {
   }
 }
 
+// --- Markdown 渲染器初始化 ---
+const md = new MarkdownIt({
+  html: true, // 允许 HTML 标签
+  breaks: true, // 转换换行符为 <br>
+  linkify: true, // 自动识别链接
+  highlight: function (str, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return '<pre class="hljs"><code>' +
+               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+               '</code></pre>';
+      } catch (__) {}
+    }
+    return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>';
+  }
+});
+
+// 启用 KaTeX 支持
+md.use(mk);
+
+// --- 样式表与模板生成 ---
+
+function generateHtml(title: string, authorInfo: string, markdownContent: string) {
+    const renderedBody = md.render(markdownContent);
+    
+    // 使用 CDN 引入必要的样式：GitHub Markdown CSS, KaTeX CSS, Highlight.js CSS
+    // 同时也包含自定义的美化样式
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/github.min.css">
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+
+  <style>
+    /* 基础重置与变量 */
+    :root {
+      --bg-color: #f6f8fa;
+      --card-bg: #ffffff;
+      --text-primary: #24292f;
+      --text-secondary: #57606a;
+      --border-color: #d0d7de;
+      --accent-color: #0969da;
+    }
+    
+    body {
+      margin: 0;
+      padding: 40px;
+      background-color: var(--bg-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text-primary);
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 32px 40px;
+      box-shadow: 0 3px 6px rgba(140, 149, 159, 0.15);
+    }
+
+    /* 头部信息 */
+    header {
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    
+    h1.title {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .meta {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    /* Markdown 内容美化 (仿 GitHub 风格) */
+    .markdown-body {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+      margin-top: 24px;
+      margin-bottom: 16px;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    .markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid #d0d7de; }
+    .markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid #d0d7de; }
+    .markdown-body h3 { font-size: 1.25em; }
+
+    .markdown-body p { margin-bottom: 16px; }
+    
+    .markdown-body a { color: var(--accent-color); text-decoration: none; }
+    .markdown-body a:hover { text-decoration: underline; }
+
+    .markdown-body blockquote {
+      margin: 0 0 16px;
+      padding: 0 1em;
+      color: var(--text-secondary);
+      border-left: 0.25em solid var(--border-color);
+    }
+
+    .markdown-body ul, .markdown-body ol { padding-left: 2em; margin-bottom: 16px; }
+
+    /* 表格样式 */
+    .markdown-body table {
+      border-spacing: 0;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      width: max-content;
+      max-width: 100%;
+      overflow: auto;
+      display: block;
+    }
+    .markdown-body table th, .markdown-body table td {
+      padding: 6px 13px;
+      border: 1px solid var(--border-color);
+    }
+    .markdown-body table tr { background-color: #fff; border-top: 1px solid #c6cbd1; }
+    .markdown-body table tr:nth-child(2n) { background-color: #f6f8fa; }
+
+    /* 代码块微调 */
+    .markdown-body pre {
+      padding: 16px;
+      overflow: auto;
+      font-size: 85%;
+      line-height: 1.45;
+      background-color: #f6f8fa;
+      border-radius: 6px;
+    }
+    .markdown-body code {
+      padding: 0.2em 0.4em;
+      margin: 0;
+      font-size: 85%;
+      background-color: rgba(175,184,193,0.2);
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    .markdown-body pre code {
+      padding: 0;
+      background-color: transparent;
+    }
+    
+    /* 图片自适应 */
+    .markdown-body img {
+      max-width: 100%;
+      box-sizing: content-box;
+      background-color: #fff;
+    }
+    
+    /* KaTeX 字体修复 */
+    .katex { font-size: 1.1em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <header>
+        <h1 class="title">${md.utils.escapeHtml(title)}</h1>
+        <div class="meta">${md.utils.escapeHtml(authorInfo)}</div>
+      </header>
+      <article class="markdown-body">
+        ${renderedBody}
+      </article>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+// --- Main Apply Function ---
+
 export function apply(ctx: Context, config: Config = {}) {
   const endpoint = config.endpoint || ''
   const userAgent = config.userAgent || 'Uptime-Kuma'
   ctx.luogu_saver = new LuoguSaverClient(ctx, endpoint, userAgent)
 
-  // 示例命令：获取文章标题
   ctx.command('获取文章信息 <id>', '获取文章信息')
     .action(async ({ options }, id) => {
       if (!id) return '请提供文章 ID'
@@ -184,19 +370,6 @@ export function apply(ctx: Context, config: Config = {}) {
       return `${art.title} by ${art.authorId}`
     })
 
-  // 示例命令：创建任务（接受 JSON 字符串）
-  // ctx.command('创建任务 <json>', '通过 JSON 请求体创建任务')
-  //   .action(async (_, json) => {
-  //     try {
-  //       const body = JSON.parse(json) as TaskCreateSave | TaskCreateAi
-  //       const id = await ctx.luogu_saver.createTask(body)
-  //       if (!id) return '创建失败'
-  //       return `任务已创建，ID: ${id}`
-  //     } catch (err) {
-  //       return '无效的 JSON 或创建失败'
-  //     }
-  //   })
-
   ctx.command('创建保存任务 <target> <targetId>', '创建类型为 save 的任务')
     .action(async (_, target, targetId) => {
       const body: TaskCreateSave = { type: 'save', payload: { target, targetId } }
@@ -205,7 +378,6 @@ export function apply(ctx: Context, config: Config = {}) {
       return `保存任务已创建，ID: ${id}`
     })
 
-  // 示例命令：查询任务状态
   ctx.command('查询任务状态 <id>', '查询任务状态')
     .action(async ({ options }, id) => {
       if (!id) return '请提供任务 ID'
@@ -222,25 +394,24 @@ export function apply(ctx: Context, config: Config = {}) {
       const art = await ctx.luogu_saver.getArticle(id)
       if (!art) return '未找到文章'
 
-      const content = (art.renderedContent ?? art.content ?? '') as string
+      // 优先使用原始 content 进行 Markdown 渲染
+      const rawContent = art.content ?? art.renderedContent ?? ''
       const title = art.title ?? ''
+      const authorInfo = `作者 UID: ${art.authorId}`
 
-      const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[c])
-
-      const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--bg:#f4f6fb;--card:#ffffff;--text:#111;--muted:#6b7280;--accent:#2563eb}html,body{height:100%}body{margin:0;background:var(--bg);-webkit-font-smoothing:antialiased;font-family:Inter,-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:40px;color:var(--text)}.container{max-width:900px;margin:0 auto}.card{background:var(--card);padding:32px;border-radius:12px;box-shadow:0 10px 30px rgba(2,6,23,0.08)}h1{font-size:28px;margin:0 0 12px}.meta{color:var(--muted);font-size:13px;margin-bottom:12px}article{line-height:1.75;color:var(--text)}img{max-width:100%;border-radius:8px}pre,code{background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}blockquote{border-left:4px solid #e6e9ef;padding:8px 16px;color:var(--muted);margin:8px 0}a{color:var(--accent)}</style></head><body><div class="container"><div class="card"><h1>${escapeHtml(title)}</h1><div class="meta">作者 ${escapeHtml(String(art.authorId))}</div><article>${content}</article></div></div></body></html>`
+      const html = generateHtml(title, authorInfo, rawContent)
 
       if (!ctx.puppeteer) return '当前没有可用的 puppeteer 服务。'
 
       const page = await ctx.puppeteer.page()
       try {
         const width = Number(options.width) || 960
+        // 适当增加高度以防截断，虽然 screenshot fullPage 会自动处理
         await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
-        // 强制浅色主题，避免因 prefers-color-scheme 导致的全黑截图
-        if (typeof page.emulateMediaFeatures === 'function') {
-          await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' } as any])
-        }
+        
         await page.setContent(html, { waitUntil: 'networkidle0' })
-        // 等待内部图片加载完成，提升截图一致性
+        
+        // 等待图片加载策略
         try {
           await page.evaluate(() => new Promise((resolve) => {
             const imgs = Array.from(document.images)
@@ -251,20 +422,17 @@ export function apply(ctx: Context, config: Config = {}) {
                 loaded++
                 return
               }
-              img.addEventListener('load', () => { loaded++; if (loaded === imgs.length) resolve(null) })
-              img.addEventListener('error', () => { loaded++; if (loaded === imgs.length) resolve(null) })
+              const handler = () => { loaded++; if (loaded === imgs.length) resolve(null) }
+              img.addEventListener('load', handler)
+              img.addEventListener('error', handler)
             })
             if (loaded === imgs.length) resolve(null)
+            // 5秒超时防止永久挂起
+            setTimeout(() => resolve(null), 5000)
           }))
         } catch (e) {}
-        // 强制页面白色背景，避免透明或黑底问题
-        try {
-          await page.evaluate(() => {
-            document.documentElement.style.background = '#ffffff'
-            if (document.body) document.body.style.background = '#ffffff'
-          })
-        } catch (e) {}
-        const buffer = await page.screenshot({ fullPage: true, type: 'png', omitBackground: false })
+
+        const buffer = await page.screenshot({ fullPage: true, type: 'png' })
         return h.image(buffer as Buffer, 'image/png')
       } catch (err) {
         ctx.logger.error('截图文章失败', err)
@@ -274,57 +442,51 @@ export function apply(ctx: Context, config: Config = {}) {
       }
     })
 
-    // 新增命令：截图剪贴为长图
-    ctx.command('获取剪贴板 <id>', '获取剪贴板内容并截取长图')
-      .option('width', '-w <width:number>', { fallback: 960 })
-      .action(async ({ session, options }, id) => {
-        if (!id) return '请提供剪贴板 ID'
-        const paste = await ctx.luogu_saver.getPaste(id)
-        if (!paste) return '未找到剪贴板内容'
+  ctx.command('获取剪贴板 <id>', '获取剪贴板内容并截取长图')
+    .option('width', '-w <width:number>', { fallback: 960 })
+    .action(async ({ session, options }, id) => {
+      if (!id) return '请提供剪贴板 ID'
+      const paste = await ctx.luogu_saver.getPaste(id)
+      if (!paste) return '未找到剪贴板内容'
 
-        const content = (paste.renderedContent ?? paste.content ?? '') as string
-        const title = paste.id ?? ''
+      const rawContent = paste.content ?? paste.renderedContent ?? ''
+      const title = `剪贴板: ${paste.id}`
+      const authorInfo = paste.author ? `创建者: ${paste.author.name} (UID: ${paste.author.id})` : `创建者 UID: ${paste.authorId}`
 
-        const escapeHtml = (s: string) => s.replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' } as any)[c])
+      const html = generateHtml(title, authorInfo, rawContent)
 
-        const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--bg:#f4f6fb;--card:#ffffff;--text:#111;--muted:#6b7280;--accent:#2563eb}html,body{height:100%}body{margin:0;background:var(--bg);-webkit-font-smoothing:antialiased;font-family:Inter,-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:40px;color:var(--text)}.container{max-width:900px;margin:0 auto}.card{background:var(--card);padding:24px;border-radius:12px;box-shadow:0 8px 20px rgba(2,6,23,0.06)}h1{font-size:20px;margin:0 0 8px}pre,code{white-space:pre-wrap;word-break:break-word;background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}img{max-width:100%;border-radius:6px}a{color:var(--accent)}</style></head><body><div class="container"><div class="card"><h1>${escapeHtml(title)}</h1><article>${content}</article></div></div></body></html>`
+      if (!ctx.puppeteer) return '当前没有可用的 puppeteer 服务。'
 
-        if (!ctx.puppeteer) return '当前没有可用的 puppeteer 服务。'
-
-        const page = await ctx.puppeteer.page()
+      const page = await ctx.puppeteer.page()
+      try {
+        const width = Number(options.width) || 960
+        await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
+        
+        await page.setContent(html, { waitUntil: 'networkidle0' })
+        
         try {
-          const width = Number(options.width) || 960
-          await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
-          if (typeof page.emulateMediaFeatures === 'function') {
-            await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' } as any])
-          }
-          await page.setContent(html, { waitUntil: 'networkidle0' })
-          try {
             await page.evaluate(() => new Promise((resolve) => {
               const imgs = Array.from(document.images)
               if (!imgs.length) return resolve(null)
               let loaded = 0
               imgs.forEach((img) => {
                 if (img.complete) { loaded++; return }
-                img.addEventListener('load', () => { loaded++; if (loaded === imgs.length) resolve(null) })
-                img.addEventListener('error', () => { loaded++; if (loaded === imgs.length) resolve(null) })
+                const handler = () => { loaded++; if (loaded === imgs.length) resolve(null) }
+                img.addEventListener('load', handler)
+                img.addEventListener('error', handler)
               })
               if (loaded === imgs.length) resolve(null)
+              setTimeout(() => resolve(null), 5000)
             }))
-          } catch (e) {}
-          try {
-            await page.evaluate(() => {
-              document.documentElement.style.background = '#ffffff'
-              if (document.body) document.body.style.background = '#ffffff'
-            })
-          } catch (e) {}
-          const buffer = await page.screenshot({ fullPage: true, type: 'png', omitBackground: false })
-          return h.image(buffer as Buffer, 'image/png')
-        } catch (err) {
-          ctx.logger.error('截图剪贴板失败', err)
-          return '获取失败。'
-        } finally {
-          page.close()
-        }
-      })
+        } catch (e) {}
+
+        const buffer = await page.screenshot({ fullPage: true, type: 'png' })
+        return h.image(buffer as Buffer, 'image/png')
+      } catch (err) {
+        ctx.logger.error('截图剪贴板失败', err)
+        return '获取失败。'
+      } finally {
+        page.close()
+      }
+    })
 }
