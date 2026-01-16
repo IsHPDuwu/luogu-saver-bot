@@ -1,7 +1,7 @@
 import { Context, Schema, h } from 'koishi'
 import { TaskStatus, statusToString } from './task'
 import MarkdownIt from 'markdown-it'
-import mk from 'markdown-it-katex'
+import { katex } from '@mdit/plugin-katex'
 import hljs from 'highlight.js'
 
 export const name = 'luogu-saver-bot'
@@ -172,23 +172,12 @@ declare module 'koishi' {
 
 // --- Markdown 渲染器初始化 ---
 const md = new MarkdownIt({
-  html: true, // 允许 HTML 标签
-  breaks: true, // 转换换行符为 <br>
-  linkify: true, // 自动识别链接
-  highlight: function (str, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return '<pre class="hljs"><code>' +
-               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
-               '</code></pre>';
-      } catch (__) {}
-    }
-    return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>';
-  }
+  html: true,
+  breaks: true,
+}).use(katex, {
+  allowFunctionInTextMode: true, // 允许在文本模式下使用函数
+  strict: false, // 禁用严格模式，防止因不标准语法报错
 });
-
-// 启用 KaTeX 支持
-md.use(mk);
 
 // --- 样式表与模板生成 ---
 
@@ -410,27 +399,51 @@ export function apply(ctx: Context, config: Config = {}) {
         await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
         
         await page.setContent(html, { waitUntil: 'networkidle0' })
+
+        // --- 核心修改开始 ---
         
-        // 等待图片加载策略
+        // 1. 等待 Web 字体加载完成 (这是解决 LaTeX 不显示的关键)
         try {
-          await page.evaluate(() => new Promise((resolve) => {
-            const imgs = Array.from(document.images)
-            if (!imgs.length) return resolve(null)
-            let loaded = 0
-            imgs.forEach((img) => {
-              if (img.complete) {
-                loaded++
-                return
+          await page.evaluate(() => document.fonts.ready);
+        } catch (e) {
+          ctx.logger.warn('等待字体加载超时或失败', e);
+        }
+
+        // 2. 等待图片加载 (保留你原有的逻辑，稍微优化)
+        try {
+            await page.evaluate(() => new Promise((resolve) => {
+              const imgs = Array.from(document.images)
+              if (!imgs.length) return resolve(null)
+              let loaded = 0
+              
+              // 增加超时机制，防止某张图片卡死整个流程
+              const timeout = setTimeout(() => resolve(null), 5000);
+
+              const handler = () => { 
+                loaded++; 
+                if (loaded === imgs.length) {
+                  clearTimeout(timeout);
+                  resolve(null);
+                }
               }
-              const handler = () => { loaded++; if (loaded === imgs.length) resolve(null) }
-              img.addEventListener('load', handler)
-              img.addEventListener('error', handler)
-            })
-            if (loaded === imgs.length) resolve(null)
-            // 5秒超时防止永久挂起
-            setTimeout(() => resolve(null), 5000)
-          }))
+              
+              imgs.forEach((img) => {
+                if (img.complete) {
+                  loaded++;
+                } else {
+                  img.addEventListener('load', handler)
+                  img.addEventListener('error', handler) // 图片挂了也要继续
+                }
+              })
+              // 如果所有图片初始就是 complete 状态
+              if (loaded === imgs.length) {
+                  clearTimeout(timeout);
+                  resolve(null);
+              }
+            }))
         } catch (e) {}
+
+        // --- 核心修改结束 ---
 
         const buffer = await page.screenshot({ fullPage: true, type: 'png' })
         return h.image(buffer as Buffer, 'image/png')
@@ -463,7 +476,12 @@ export function apply(ctx: Context, config: Config = {}) {
         await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
         
         await page.setContent(html, { waitUntil: 'networkidle0' })
-        
+
+        // 等待 KaTeX 客户端渲染完成
+        try {
+          await page.waitForFunction('window.__katex_render_done === true', { timeout: 20000 })
+        } catch (e) {}
+
         try {
             await page.evaluate(() => new Promise((resolve) => {
               const imgs = Array.from(document.images)
