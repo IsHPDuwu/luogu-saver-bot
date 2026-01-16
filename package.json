@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-luogu-saver-bot",
   "description": "洛谷保存站机器人",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -15,8 +15,12 @@
     "koishi",
     "plugin"
   ],
-  "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.7"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.0",
+    "markdown-it-katex": "^2.0.3"
   }
 }
