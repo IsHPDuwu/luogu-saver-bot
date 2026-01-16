@@ -1,8 +1,6 @@
 import { Context, Schema, h } from 'koishi'
 import { TaskStatus, statusToString } from './task'
 import MarkdownIt from 'markdown-it'
-import { katex } from '@mdit/plugin-katex'
-import hljs from 'highlight.js'
 
 export const name = 'luogu-saver-bot'
 export const inject = ['puppeteer']
@@ -169,6 +167,8 @@ declare module 'koishi' {
     puppeteer?: any
   }
 }
+
+const { katex } = await import('@mdit/plugin-katex')
 
 // --- Markdown 渲染器初始化 ---
 const md = new MarkdownIt({
