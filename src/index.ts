@@ -3,7 +3,8 @@ import { TaskStatus, statusToString } from './task'
 import MarkdownIt from 'markdown-it'
 
 export const name = 'luogu-saver-bot'
-export const inject = ['puppeteer']
+// 1. 注入 censor 服务
+export const inject = ['puppeteer', 'censor']
 
 export interface Config {
   endpoint?: string
@@ -165,7 +166,16 @@ declare module 'koishi' {
   interface Context {
     luogu_saver: LuoguSaverClient
     puppeteer?: any
+    // 声明 censor 服务
+    censor: any
   }
+}
+
+async function censoring(ctx: Context, text: string) {
+  if(!ctx.censor) return text;
+  console.log(await ctx.censor.transform(text));
+  // return h.unescape(`<censor>${text}</censor>`);
+  return await ctx.censor.transform(text)
 }
 
 // --- 样式表与模板生成 ---
@@ -180,13 +190,13 @@ async function generateHtml(title: string, authorInfo: string, markdownContent: 
   }).use(katex, {
     allowFunctionInTextMode: true, // 允许在文本模式下使用函数
     strict: false, // 禁用严格模式，防止因不标准语法报错
-  });  
-  
+  });
+
   const renderedBody = md.render(markdownContent);
-    
-    // 使用 CDN 引入必要的样式：GitHub Markdown CSS, KaTeX CSS, Highlight.js CSS
-    // 同时也包含自定义的美化样式
-    return `<!doctype html>
+
+  // 使用 CDN 引入必要的样式：GitHub Markdown CSS, KaTeX CSS, Highlight.js CSS
+  // 同时也包含自定义的美化样式
+  return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -356,7 +366,7 @@ export function apply(ctx: Context, config: Config = {}) {
       const art = await ctx.luogu_saver.getArticle(id)
       console.log(art)
       if (!art) return '未找到文章'
-      return `${art.title} by ${art.authorId}`
+      return await censoring(ctx, `${art.title} by ${art.authorId}`)
     })
 
   ctx.command('创建保存任务 <target> <targetId>', '创建类型为 save 的任务')
@@ -373,7 +383,7 @@ export function apply(ctx: Context, config: Config = {}) {
       const task = await ctx.luogu_saver.getTask(id)
       if (task == null) return '任务不存在或返回为空'
       if (typeof task === 'object' && 'status' in task) return `任务 ${id} 状态: ${statusToString((task as any).status)}`
-      return JSON.stringify(task)
+      return await censoring(ctx, JSON.stringify(task))
     })
 
   ctx.command('获取文章 <id>', '获取文章并截取长图')
@@ -384,9 +394,9 @@ export function apply(ctx: Context, config: Config = {}) {
       if (!art) return '未找到文章'
 
       // 优先使用原始 content 进行 Markdown 渲染
-      const rawContent = art.content ?? art.renderedContent ?? ''
-      const title = art.title ?? ''
-      const authorInfo = `作者 UID: ${art.authorId}`
+      const rawContent = await censoring(ctx, art.content ?? art.renderedContent ?? '')
+      const title = await censoring(ctx, art.title ?? '')
+      const authorInfo = await censoring(ctx, `作者 UID: ${art.authorId}`)
 
       const html = await generateHtml(title, authorInfo, rawContent)
 
@@ -397,11 +407,11 @@ export function apply(ctx: Context, config: Config = {}) {
         const width = Number(options.width) || 960
         // 适当增加高度以防截断，虽然 screenshot fullPage 会自动处理
         await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
-        
+
         await page.setContent(html, { waitUntil: 'networkidle0' })
 
         // --- 核心修改开始 ---
-        
+
         // 1. 等待 Web 字体加载完成 (这是解决 LaTeX 不显示的关键)
         try {
           await page.evaluate(() => document.fonts.ready);
@@ -411,37 +421,37 @@ export function apply(ctx: Context, config: Config = {}) {
 
         // 2. 等待图片加载 (保留你原有的逻辑，稍微优化)
         try {
-            await page.evaluate(() => new Promise((resolve) => {
-              const imgs = Array.from(document.images)
-              if (!imgs.length) return resolve(null)
-              let loaded = 0
-              
-              // 增加超时机制，防止某张图片卡死整个流程
-              const timeout = setTimeout(() => resolve(null), 5000);
+          await page.evaluate(() => new Promise((resolve) => {
+            const imgs = Array.from(document.images)
+            if (!imgs.length) return resolve(null)
+            let loaded = 0
 
-              const handler = () => { 
-                loaded++; 
-                if (loaded === imgs.length) {
-                  clearTimeout(timeout);
-                  resolve(null);
-                }
-              }
-              
-              imgs.forEach((img) => {
-                if (img.complete) {
-                  loaded++;
-                } else {
-                  img.addEventListener('load', handler)
-                  img.addEventListener('error', handler) // 图片挂了也要继续
-                }
-              })
-              // 如果所有图片初始就是 complete 状态
+            // 增加超时机制，防止某张图片卡死整个流程
+            const timeout = setTimeout(() => resolve(null), 5000);
+
+            const handler = () => {
+              loaded++;
               if (loaded === imgs.length) {
-                  clearTimeout(timeout);
-                  resolve(null);
+                clearTimeout(timeout);
+                resolve(null);
               }
-            }))
-        } catch (e) {}
+            }
+
+            imgs.forEach((img) => {
+              if (img.complete) {
+                loaded++;
+              } else {
+                img.addEventListener('load', handler)
+                img.addEventListener('error', handler) // 图片挂了也要继续
+              }
+            })
+            // 如果所有图片初始就是 complete 状态
+            if (loaded === imgs.length) {
+              clearTimeout(timeout);
+              resolve(null);
+            }
+          }))
+        } catch (e) { }
 
         // --- 核心修改结束 ---
 
@@ -462,9 +472,12 @@ export function apply(ctx: Context, config: Config = {}) {
       const paste = await ctx.luogu_saver.getPaste(id)
       if (!paste) return '未找到剪贴板内容'
 
-      const rawContent = paste.content ?? paste.renderedContent ?? ''
-      const title = `剪贴板: ${paste.id}`
-      const authorInfo = paste.author ? `创建者: ${paste.author.name} (UID: ${paste.author.id})` : `创建者 UID: ${paste.authorId}`
+      const rawContent = await censoring(ctx, paste.content ?? paste.renderedContent ?? '')
+      console.log(rawContent)
+      const title = await censoring(ctx, `剪贴板: ${paste.id}`)
+      console.log(title)
+      const authorInfo = await censoring(ctx, paste.author ? `创建者: ${paste.author.name} (UID: ${paste.author.id})` : `创建者 UID: ${paste.authorId}`)
+      console.log(authorInfo)
 
       const html = await generateHtml(title, authorInfo, rawContent)
 
@@ -474,29 +487,29 @@ export function apply(ctx: Context, config: Config = {}) {
       try {
         const width = Number(options.width) || 960
         await page.setViewport({ width, height: 800, deviceScaleFactor: 2 })
-        
+
         await page.setContent(html, { waitUntil: 'networkidle0' })
 
         // 等待 KaTeX 客户端渲染完成
         try {
           await page.waitForFunction('window.__katex_render_done === true', { timeout: 20000 })
-        } catch (e) {}
+        } catch (e) { }
 
         try {
-            await page.evaluate(() => new Promise((resolve) => {
-              const imgs = Array.from(document.images)
-              if (!imgs.length) return resolve(null)
-              let loaded = 0
-              imgs.forEach((img) => {
-                if (img.complete) { loaded++; return }
-                const handler = () => { loaded++; if (loaded === imgs.length) resolve(null) }
-                img.addEventListener('load', handler)
-                img.addEventListener('error', handler)
-              })
-              if (loaded === imgs.length) resolve(null)
-              setTimeout(() => resolve(null), 5000)
-            }))
-        } catch (e) {}
+          await page.evaluate(() => new Promise((resolve) => {
+            const imgs = Array.from(document.images)
+            if (!imgs.length) return resolve(null)
+            let loaded = 0
+            imgs.forEach((img) => {
+              if (img.complete) { loaded++; return }
+              const handler = () => { loaded++; if (loaded === imgs.length) resolve(null) }
+              img.addEventListener('load', handler)
+              img.addEventListener('error', handler)
+            })
+            if (loaded === imgs.length) resolve(null)
+            setTimeout(() => resolve(null), 5000)
+          }))
+        } catch (e) { }
 
         const buffer = await page.screenshot({ fullPage: true, type: 'png' })
         return h.image(buffer as Buffer, 'image/png')
