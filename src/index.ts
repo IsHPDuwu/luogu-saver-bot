@@ -172,7 +172,7 @@ declare module 'koishi' {
 }
 
 async function censoring(ctx: Context, text: string) {
-  if(!ctx.censor) return text;
+  if (!ctx.censor) return text;
   console.log(await ctx.censor.transform(text));
   // return h.unescape(`<censor>${text}</censor>`);
   return await ctx.censor.transform(text)
@@ -365,7 +365,11 @@ export function apply(ctx: Context, config: Config = {}) {
       if (!id) return '请提供文章 ID'
       const art = await ctx.luogu_saver.getArticle(id)
       console.log(art)
-      if (!art) return '未找到文章'
+      if (!art) {
+        const taskId = await ctx.luogu_saver.createTask({ type: 'save', payload: { target: 'article', targetId: id } })
+        if (!taskId) return '未找到文章，创建保存任务失败'
+        return `未找到文章，正在创建 task 以获取文章，请稍后重新获取\n保存任务已创建，ID: ${taskId}`
+      }
       return await censoring(ctx, `${art.title} by ${art.authorId}`)
     })
 
@@ -391,7 +395,11 @@ export function apply(ctx: Context, config: Config = {}) {
     .action(async ({ session, options }, id) => {
       if (!id) return '请提供文章 ID'
       const art = await ctx.luogu_saver.getArticle(id)
-      if (!art) return '未找到文章'
+      if (!art) {
+        const taskId = await ctx.luogu_saver.createTask({ type: 'save', payload: { target: 'article', targetId: id } })
+        if (!taskId) return '未找到文章，创建保存任务失败'
+        return `未找到文章，正在创建 task 以获取文章，请稍后重新获取\n保存任务已创建，ID: ${taskId}`
+      }
 
       // 优先使用原始 content 进行 Markdown 渲染
       const rawContent = await censoring(ctx, art.content ?? art.renderedContent ?? '')
@@ -470,7 +478,11 @@ export function apply(ctx: Context, config: Config = {}) {
     .action(async ({ session, options }, id) => {
       if (!id) return '请提供剪贴板 ID'
       const paste = await ctx.luogu_saver.getPaste(id)
-      if (!paste) return '未找到剪贴板内容'
+      if (!paste) {
+        const taskId = await ctx.luogu_saver.createTask({ type: 'save', payload: { target: 'paste', targetId: id } })
+        if (!taskId) return '未找到剪贴板，创建保存任务失败'
+        return `未找到剪贴板，正在创建 task 以获取剪贴板，请稍后重新获取\n保存任务已创建，ID: ${taskId}`
+      }
 
       const rawContent = await censoring(ctx, paste.content ?? paste.renderedContent ?? '')
       console.log(rawContent)
@@ -519,5 +531,14 @@ export function apply(ctx: Context, config: Config = {}) {
       } finally {
         page.close()
       }
+    })
+
+
+  ctx.command('echo-censor <text>', '测试文本审查服务')
+    .action(async ({ options }, text) => {
+      if (!text) return '请提供文本'
+      // 把返回的文本 type 获取 log 一下
+      const result = await censoring(ctx, text)
+      return result
     })
 }
